@@ -31,11 +31,7 @@ function normalizeBrandToFileKey(brandRaw) {
     .toLowerCase()
     .replace(/\s+/g, '_');
 
-  const alias = {
-    // contoh alias umum
-    queensland: 'queensand', // kalau brand kamu "Queensland" tapi file "queensand.html"
-  };
-  return alias[s] || s;
+  return  s;
 }
 
 /**
