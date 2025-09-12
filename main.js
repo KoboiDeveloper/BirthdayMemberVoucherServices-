@@ -33,7 +33,7 @@ function normalizeBrandToFileKey(brandRaw) {
 
   const alias = {
     // contoh alias umum
-    queensland: 'queensland', // kalau brand kamu "Queensland" tapi file "queensand.html"
+    queensland: 'queensand', // kalau brand kamu "Queensland" tapi file "queensand.html"
   };
   return alias[s] || s;
 }
