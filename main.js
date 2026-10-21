@@ -64,10 +64,27 @@ async function fetchMembers() {
   const apiUrl = env('API_URL');
   const token = env('API_TOKEN');
 
-  const response = await axios.post(apiUrl, null, {
-    params: { token },
-    timeout: 15000,
-  });
+  let response;
+  try {
+    response = await axios.post(apiUrl, null, {
+      params: { token },
+      timeout: 15000,
+      validateStatus: () => true, // handle non-2xx ourselves for clearer logs
+    });
+  } catch (err) {
+    const detail = err.response
+      ? `HTTP ${err.response.status}: ${typeof err.response.data === 'string' ? err.response.data : JSON.stringify(err.response.data)}`
+      : err.message;
+    throw new Error(`API_URL request failed (${apiUrl}): ${detail}`);
+  }
+
+  if (response.status >= 400) {
+    const body =
+      typeof response.data === 'string'
+        ? response.data
+        : JSON.stringify(response.data);
+    throw new Error(`API_URL returned HTTP ${response.status}: ${body}`);
+  }
 
   const payload = response.data;
 
