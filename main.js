@@ -1,53 +1,68 @@
 /*
  sendBirthdayEmails.js
- Node.js script to fetch birthday members and send them personalized emails
- Uses axios for HTTP requests, nodemailer for sending emails, and dotenv for configuration.
+ Node.js script to fetch birthday members and send them personalized emails.
 
- Prerequisites:
-  - .env:
-      API_URL=...
-      API_TOKEN=...                     // [ADD] opsional kalau mau lewat env
-      SMTP_HOST=...
-      SMTP_PORT=587
-      SMTP_SECURE=false
-      SMTP_USER=...
-      SMTP_PASS=...
-      SMTP_FROM="Your Company <no-reply@yourdomain.com>"
+ Env (Coolify Environment Variables / local .env):
+   API_URL
+   API_TOKEN
+   SMTP_HOST
+   SMTP_PORT
+   SMTP_SECURE   // "true" | "false"
+   SMTP_USER
+   SMTP_PASS
+   SMTP_FROM
+   DEBUG         // optional "true"
 */
 
-require('dotenv').config();
-const axios = require('axios');
-const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 
-/** --------------------------------
- * Helpers
- * --------------------------------*/
+// Local only: load .env if present. Coolify already injects process.env —
+// dotenv does not override existing vars by default.
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
+}
+
+const axios = require('axios');
+const nodemailer = require('nodemailer');
+
+function env(name, fallback) {
+  const v = process.env[name];
+  if (v === undefined || v === null || String(v).trim() === '') {
+    return fallback;
+  }
+  return String(v).trim();
+}
+
+function requireEnv(names) {
+  const missing = names.filter((n) => !env(n));
+  if (missing.length) {
+    throw new Error(
+      `Missing required environment variable(s): ${missing.join(', ')}. ` +
+        'Set them in Coolify → Environment Variables (or local .env).'
+    );
+  }
+}
+
 function normalizeBrandToFileKey(brandRaw) {
-  // [ADD] Normalisasi brand → nama file template (lowercase, spasi → underscore, alias brand)
   const s = String(brandRaw || '')
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '_');
 
   const alias = {
-    // contoh alias umum
-    queensland: 'queensland', // kalau brand kamu "Queensland" tapi file "queensand.html"
+    queensland: 'queensland',
   };
   return alias[s] || s;
 }
 
 /**
  * Fetch members whose birthday is today, along with voucher info.
- * Mengembalikan array member atau [] jika API bilang success tanpa data.
  */
- async function fetchMembers() {
-  const apiUrl = process.env.API_URL;
-  const token = process.env.API_TOKEN || '93564344792053024757076963936537'; // (tetap)
-
-  if (!apiUrl) throw new Error('Missing API_URL in environment');
-  if (!token) throw new Error('Missing API_TOKEN');
+async function fetchMembers() {
+  const apiUrl = env('API_URL');
+  const token = env('API_TOKEN');
 
   const response = await axios.post(apiUrl, null, {
     params: { token },
@@ -56,47 +71,48 @@ function normalizeBrandToFileKey(brandRaw) {
 
   const payload = response.data;
 
-  if (process.env.DEBUG === 'true') {
+  if (env('DEBUG') === 'true') {
     console.log('Raw API payload:', JSON.stringify(payload).slice(0, 500));
   }
 
-  // Bentuk array langsung
   if (Array.isArray(payload)) return payload;
-
-  // Bentuk umum { data: [...] }
   if (payload && Array.isArray(payload.data)) return payload.data;
-
-  // Variasi lain
   if (payload && Array.isArray(payload.items)) return payload.items;
   if (payload && payload.data && Array.isArray(payload.data.items)) return payload.data.items;
 
-  // Satu objek tunggal -> jadikan array
-  if (payload && typeof payload === 'object' && !Array.isArray(payload) &&
-      (payload.id_member || payload.email || payload.nama)) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload.id_member || payload.email || payload.nama)
+  ) {
     return [payload];
   }
 
-  // [ADD] API kadang hanya mengirim status sukses tanpa data
-  if (payload && typeof payload === 'object' &&
-      payload.status && /^success/i.test(String(payload.status)) &&
-      !payload.data) {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    payload.status &&
+    /^success/i.test(String(payload.status)) &&
+    !payload.data
+  ) {
     console.log('API success without data. Treat as 0 members.');
     return [];
   }
 
-  // [ADD] Khusus pesan: "Tidak ada member yang ultang/ulang tahun"
   if (payload && typeof payload === 'object') {
     const texts = [payload.status, payload.message, payload.msg, payload.info]
-      .filter(v => typeof v === 'string')
-      .map(s => s.toLowerCase());
+      .filter((v) => typeof v === 'string')
+      .map((s) => s.toLowerCase());
 
-    const noBday = texts.some(t =>
-      t.includes('tidak ada member') &&
-      (t.includes('ultang tahun') || t.includes('ulang tahun'))
+    const noBday = texts.some(
+      (t) =>
+        t.includes('tidak ada member') &&
+        (t.includes('ultang tahun') || t.includes('ulang tahun'))
     );
 
     if (noBday) {
-      console.log('API: Tidak ada member yang ulang tahun hari ini.'); // [ADD]
+      console.log('API: Tidak ada member yang ulang tahun hari ini.');
       return [];
     }
   }
@@ -104,13 +120,7 @@ function normalizeBrandToFileKey(brandRaw) {
   throw new Error('Unexpected API response format');
 }
 
-
-/**
- * Load the HTML template file for a given brand key (normalized).
- * Template filenames must match the normalized brand value plus .html
- */
 function loadTemplate(brandKey) {
-  // [CHG] parameter sekarang brandKey yang sudah dinormalisasi
   const fileName = `${brandKey}.html`;
   const templatePath = path.join(__dirname, 'templates', fileName);
   if (!fs.existsSync(templatePath)) {
@@ -119,12 +129,7 @@ function loadTemplate(brandKey) {
   return fs.readFileSync(templatePath, 'utf-8');
 }
 
-/**
- * Replace placeholders in template with member-specific values.
- * Dukung {{nama}}, {{kode_voucher}} / {{kodeVoucher}}, {{nominal_voucher}} / {{nominalVoucher}}
- */
 function personalize(template, member) {
-  // [FIX] dukung snake_case & camelCase
   const kodeVoucher = member.kode_voucher ?? member.kodeVoucher ?? '';
   const nominalVoucher = member.nominal_voucher ?? member.nominalVoucher ?? '';
 
@@ -134,13 +139,8 @@ function personalize(template, member) {
     .replace(/{{\s*(nominal_voucher|nominalVoucher)\s*}}/g, String(nominalVoucher));
 }
 
-/**
- * Send an email using a nodemailer transporter.
- * Attachment banner bersifat opsional (jika file ada).
- */
 async function sendEmail(transporter, member, html, brandKey) {
   const attachments = [];
-  // [ADD] lampiran banner opsional
   const bannerPath = path.join(__dirname, 'templates', 'banner', `${brandKey}.jpg`);
   if (fs.existsSync(bannerPath)) {
     attachments.push({
@@ -151,51 +151,55 @@ async function sendEmail(transporter, member, html, brandKey) {
   }
 
   const mailOptions = {
-    from: process.env.SMTP_FROM,
+    from: env('SMTP_FROM'),
     to: member.email,
-    subject: `Selamat Ulang Tahun, ${member.nama || 'Member'}!`, // [CHG] fallback nama
+    subject: `Selamat Ulang Tahun, ${member.nama || 'Member'}!`,
     html,
-    attachments, // [CHG]
+    attachments,
   };
   return transporter.sendMail(mailOptions);
 }
 
-/**
- * Main execution
- */
 (async () => {
   try {
-    // 1. Fetch members
+    requireEnv([
+      'API_URL',
+      'API_TOKEN',
+      'SMTP_HOST',
+      'SMTP_PORT',
+      'SMTP_USER',
+      'SMTP_PASS',
+      'SMTP_FROM',
+    ]);
+
+    console.log('Config OK. API_URL=', env('API_URL'));
+
     const members = await fetchMembers();
     if (!members.length) {
       console.log('No birthday members found today.');
       return;
     }
-    console.log(`Found ${members.length} member(s) with birthday today.`); // [ADD]
+    console.log(`Found ${members.length} member(s) with birthday today.`);
 
-    // 2. Configure SMTP transporter
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT, 10),
-      secure: process.env.SMTP_SECURE === 'true',
+      host: env('SMTP_HOST'),
+      port: parseInt(env('SMTP_PORT'), 10),
+      secure: env('SMTP_SECURE', 'false').toLowerCase() === 'true',
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: env('SMTP_USER'),
+        pass: env('SMTP_PASS'),
       },
     });
 
-    // (opsional) verifikasi koneksi SMTP
     try {
-      await transporter.verify(); // [ADD]
+      await transporter.verify();
       console.log('SMTP connection verified.');
     } catch (vErr) {
       console.warn('SMTP verify failed (continuing):', vErr.message);
     }
 
-    // 3. Loop through members and send emails
     for (const member of members) {
       try {
-        // [FIX] dukung nama field brand versi snake/camel
         const brandRaw =
           member.brandTerbanyak ??
           member.brand_terbanyak ??

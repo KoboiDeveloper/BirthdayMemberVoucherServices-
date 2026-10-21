@@ -1,4 +1,12 @@
 {
+  "name": "birthday-member-voucher-services",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "send": "node main.js"
+  },
   "dependencies": {
     "axios": "^1.10.0",
     "dotenv": "^17.2.0",
